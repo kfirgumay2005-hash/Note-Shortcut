@@ -441,9 +441,7 @@ export class NoteShortcutSettingTab extends PluginSettingTab {
 		containerEl.empty();
 
 		// תיקון לאזהרת Create Heading
-		new Setting(containerEl)
-			.setName('Note Shortcuts Settings')
-			.setHeading();
+		new Setting(containerEl).setName('Note Shortcuts').setHeading();
 
 		containerEl.createEl('p', {
 			text: 'Add custom commands to instantly open specific notes',

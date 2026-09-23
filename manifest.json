@@ -1,7 +1,7 @@
 {
 	"id": "noteshortcut",
 	"name": "Note-Shortcut",
-	"version": "1.0.1",
+	"version": "1.0.2",
 	"minAppVersion": "1.4.0",
 	"description": "Access a specific note in an instant using editing toolbar plugin. Perfect for mobile.",
 	"author": "KfirG",
