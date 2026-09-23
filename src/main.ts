@@ -1,114 +1,73 @@
-import {
-	Editor,
-	MarkdownView,
-	MarkdownFileInfo,
-	Modal,
-	Notice,
-	Plugin,
-} from 'obsidian';
-import {
-	DEFAULT_SETTINGS,
-	MyPluginSettings,
-	SampleSettingTab,
-} from './settings';
+import { Plugin, TFile, Notice } from 'obsidian';
+import { NoteShortcutSettingTab, ShortcutItem } from './settings';
 
-// Remember to rename these classes and interfaces!
+export interface PluginSettings {
+	shortcuts: ShortcutItem[];
+}
 
-export default class MyPlugin extends Plugin {
-	settings!: MyPluginSettings;
+const DEFAULT_SETTINGS: PluginSettings = {
+	shortcuts: [],
+};
+
+export default class NoteShortcutPlugin extends Plugin {
+	settings!: PluginSettings;
+	registeredCommandIds: string[] = [];
 
 	async onload() {
 		await this.loadSettings();
-
-		// This creates an icon in the left ribbon.
-		this.addRibbonIcon('dice', 'Sample', (_evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
-		});
-
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status bar text');
-
-		// This adds a simple command that can be triggered anywhere
-		this.addCommand({
-			id: 'open-modal-simple',
-			name: 'Open modal (simple)',
-			callback: () => {
-				new SampleModal(this.app).open();
-			},
-		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'replace-selected',
-			name: 'Replace selected content',
-			editorCallback: (
-				editor: Editor,
-				_ctx: MarkdownView | MarkdownFileInfo,
-			) => {
-				editor.replaceSelection('Sample editor command');
-			},
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-modal-complex',
-			name: 'Open modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView =
-					this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
-
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
-				return false;
-			},
-		});
-
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
-
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(activeDocument, 'click', (_evt: MouseEvent) => {
-			new Notice('Click');
-		});
-
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(
-			window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000),
-		);
+		this.updateCommands();
+		this.addSettingTab(new NoteShortcutSettingTab(this.app, this));
 	}
-
-	onunload() {}
 
 	async loadSettings() {
 		this.settings = Object.assign(
 			{},
 			DEFAULT_SETTINGS,
-			(await this.loadData()) as Partial<MyPluginSettings>,
+			await this.loadData(),
 		);
 	}
 
 	async saveSettings() {
 		await this.saveData(this.settings);
 	}
-}
 
-class SampleModal extends Modal {
-	onOpen() {
-		const { contentEl } = this;
-		contentEl.setText('Woah!');
+	// רענון ורישום מחדש של הפקודות באובסידיאן
+	updateCommands() {
+		const appCommands = (this.app as any).commands;
+		for (const id of this.registeredCommandIds) {
+			if (
+				appCommands &&
+				typeof appCommands.removeCommand === 'function'
+			) {
+				appCommands.removeCommand(id);
+			}
+		}
+		this.registeredCommandIds = [];
+
+		for (const shortcut of this.settings.shortcuts) {
+			if (!shortcut.name || !shortcut.filePath) continue;
+
+			const commandId = `note-shortcut-${shortcut.id}`;
+			const cmd = this.addCommand({
+				id: commandId,
+				name: shortcut.name,
+				icon: shortcut.icon || 'file',
+				callback: () => this.openNote(shortcut.filePath),
+			});
+
+			if (cmd) {
+				this.registeredCommandIds.push(cmd.id);
+			}
+		}
 	}
 
-	onClose() {
-		const { contentEl } = this;
-		contentEl.empty();
+	async openNote(filePath: string) {
+		const file = this.app.vault.getAbstractFileByPath(filePath);
+		if (file && file instanceof TFile) {
+			const leaf = this.app.workspace.getLeaf(false);
+			await leaf.openFile(file);
+		} else {
+			new Notice(`Note Shortcut: File not found at "${filePath}"`);
+		}
 	}
 }
