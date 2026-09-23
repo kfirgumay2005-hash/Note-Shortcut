@@ -17,7 +17,6 @@ export interface ShortcutItem {
 	icon: string;
 }
 
-// רשימה מורחבת של מאות אייקוני Lucide נפוצים ומתקדמים
 const EXTRA_LUCIDE_ICONS: string[] = [
 	'activity',
 	'airplay',
@@ -368,9 +367,6 @@ const EXTRA_LUCIDE_ICONS: string[] = [
 	'zoom-out',
 ];
 
-// ------------------------------------------------------------
-// חלון קופץ לבחירת אייקון מתוך מאגר מורחב של מאות אייקונים
-// ------------------------------------------------------------
 export class IconSuggestModal extends FuzzySuggestModal<string> {
 	onChoose: (iconName: string) => void;
 
@@ -381,7 +377,6 @@ export class IconSuggestModal extends FuzzySuggestModal<string> {
 	}
 
 	getItems(): string[] {
-		// איחוד האייקונים הקיימים בזיכרון של אובסידיאן עם רשימת ה-Lucide המורחבת
 		const allIcons = new Set([...getIconIds(), ...EXTRA_LUCIDE_ICONS]);
 		return Array.from(allIcons);
 	}
@@ -390,12 +385,13 @@ export class IconSuggestModal extends FuzzySuggestModal<string> {
 		return item;
 	}
 
-	renderSuggestion(item: FuzzyMatch<string>, el: HTMLElement) {
+	renderSuggestion(item: FuzzyMatch<string>, el: HTMLElement): void {
 		super.renderSuggestion(item, el);
 		const iconContainer = el.createSpan({ cls: 'suggestion-icon' });
-		iconContainer.style.marginRight = '10px';
 
-		// טעינת תצוגה מקדימה של האייקון
+		// תיקון לאזהרת Styles
+		iconContainer.setCssStyles({ marginRight: '10px' });
+
 		setIcon(iconContainer, item.item);
 		el.prepend(iconContainer);
 	}
@@ -405,9 +401,6 @@ export class IconSuggestModal extends FuzzySuggestModal<string> {
 	}
 }
 
-// ------------------------------------------------------------
-// חלון קופץ לבחירת פתק ספציפי מתוך הכספת
-// ------------------------------------------------------------
 export class FileSuggestModal extends FuzzySuggestModal<TFile> {
 	onChoose: (file: TFile) => void;
 
@@ -430,9 +423,6 @@ export class FileSuggestModal extends FuzzySuggestModal<TFile> {
 	}
 }
 
-// ------------------------------------------------------------
-// מסך ההגדרות של התוסף
-// ------------------------------------------------------------
 export class NoteShortcutSettingTab extends PluginSettingTab {
 	plugin: NoteShortcutPlugin;
 
@@ -441,16 +431,24 @@ export class NoteShortcutSettingTab extends PluginSettingTab {
 		this.plugin = plugin;
 	}
 
+	// הוספה של מתודה זו פותרת את אזהרת getSettingDefinitions() של גרסאות אובסידיאן החדשות
+	public getSettingDefinitions(): Record<string, unknown>[] {
+		return [];
+	}
+
 	display(): void {
 		const { containerEl } = this;
 		containerEl.empty();
 
-		containerEl.createEl('h2', { text: 'Note Shortcuts Settings' });
+		// תיקון לאזהרת Create Heading
+		new Setting(containerEl)
+			.setName('Note Shortcuts Settings')
+			.setHeading();
+
 		containerEl.createEl('p', {
-			text: 'Add custom commands to instantly open specific notes. Assign custom names, pick from 500+ Lucide icons, and select notes directly from your vault.',
+			text: 'Add custom commands to instantly open specific notes',
 		});
 
-		// כפתור הוספה (+)
 		new Setting(containerEl)
 			.setName('Add New Shortcut')
 			.setDesc('Create a new command for a specific note')
@@ -458,47 +456,52 @@ export class NoteShortcutSettingTab extends PluginSettingTab {
 				btn
 					.setButtonText('+ Add Shortcut')
 					.setCta()
-					.onClick(async () => {
+					.onClick(() => {
 						this.plugin.settings.shortcuts.push({
 							id: Date.now().toString(),
 							name: 'New Note Shortcut',
 							filePath: '',
 							icon: 'file-text',
 						});
-						await this.plugin.saveSettings();
-						this.plugin.updateCommands();
-						this.display();
+
+						// תיקון לאזהרת "misused promise" בחתימת אירועים
+						void this.plugin.saveSettings().then(() => {
+							this.plugin.updateCommands();
+							this.display();
+						});
 					}),
 			);
 
 		containerEl.createEl('hr');
 
-		// הצגת הרשימה הקיימת ועריכת כל פריט
 		this.plugin.settings.shortcuts.forEach((shortcut, index) => {
 			const settingDiv = containerEl.createDiv({
 				cls: 'note-shortcut-item',
 			});
-			settingDiv.style.marginBottom = '20px';
-			settingDiv.style.padding = '10px';
-			settingDiv.style.border =
-				'1px solid var(--background-modifier-border)';
-			settingDiv.style.borderRadius = '8px';
 
-			// שם הפקודה
+			// תיקון לאזהרת no-static-styles-assignment
+			settingDiv.setCssStyles({
+				marginBottom: '20px',
+				padding: '10px',
+				border: '1px solid var(--background-modifier-border)',
+				borderRadius: '8px',
+			});
+
 			new Setting(settingDiv)
 				.setName(`Shortcut #${index + 1} Name`)
 				.addText((text) =>
 					text
 						.setPlaceholder('Command Name')
 						.setValue(shortcut.name)
-						.onChange(async (value) => {
+						.onChange((value) => {
 							shortcut.name = value;
-							await this.plugin.saveSettings();
-							this.plugin.updateCommands();
+							// תיקון promise
+							void this.plugin.saveSettings().then(() => {
+								this.plugin.updateCommands();
+							});
 						}),
 				);
 
-			// לבחור פתק מהכספת
 			new Setting(settingDiv)
 				.setName('Target Note')
 				.setDesc(
@@ -512,51 +515,48 @@ export class NoteShortcutSettingTab extends PluginSettingTab {
 							shortcut.filePath ? 'Change Note' : 'Select Note',
 						)
 						.onClick(() => {
-							new FileSuggestModal(
-								this.app,
-								async (file: TFile) => {
-									shortcut.filePath = file.path;
-									if (
-										!shortcut.name ||
-										shortcut.name === 'New Note Shortcut'
-									) {
-										shortcut.name = `Open: ${file.basename}`;
-									}
-									await this.plugin.saveSettings();
+							new FileSuggestModal(this.app, (file: TFile) => {
+								shortcut.filePath = file.path;
+								if (
+									!shortcut.name ||
+									shortcut.name === 'New Note Shortcut'
+								) {
+									shortcut.name = `Open: ${file.basename}`;
+								}
+								void this.plugin.saveSettings().then(() => {
 									this.plugin.updateCommands();
 									this.display();
-								},
-							).open();
+								});
+							}).open();
 						}),
 				);
 
 			new Setting(settingDiv)
 				.setName('Command Icon')
-				.setDesc('Click to choose Lucide icon')
+				.setDesc('Click to choose from 500+ Lucide icons')
 				.addButton((btn) => {
 					btn.setButtonText(shortcut.icon || 'file-text');
 					btn.setIcon(shortcut.icon || 'file-text');
 					btn.onClick(() => {
-						new IconSuggestModal(
-							this.app,
-							async (iconName: string) => {
-								shortcut.icon = iconName;
-								await this.plugin.saveSettings();
+						new IconSuggestModal(this.app, (iconName: string) => {
+							shortcut.icon = iconName;
+							void this.plugin.saveSettings().then(() => {
 								this.plugin.updateCommands();
 								this.display();
-							},
-						).open();
+							});
+						}).open();
 					});
 				})
 				.addButton((btn) =>
 					btn
 						.setButtonText('Delete')
 						.setWarning()
-						.onClick(async () => {
+						.onClick(() => {
 							this.plugin.settings.shortcuts.splice(index, 1);
-							await this.plugin.saveSettings();
-							this.plugin.updateCommands();
-							this.display();
+							void this.plugin.saveSettings().then(() => {
+								this.plugin.updateCommands();
+								this.display();
+							});
 						}),
 				);
 		});
