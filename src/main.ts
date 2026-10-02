@@ -1,4 +1,4 @@
-import { Plugin, TFile, Notice, App } from 'obsidian';
+import { Plugin, TFile, TAbstractFile, Notice, App } from 'obsidian';
 import { NoteShortcutSettingTab, ShortcutItem } from './settings';
 
 export interface PluginSettings {
@@ -9,12 +9,24 @@ const DEFAULT_SETTINGS: PluginSettings = {
 	shortcuts: [],
 };
 
-// הגדרת ממשק כדי למנוע את שגיאות ה-any על this.app.commands
 export interface AppWithCommands extends App {
 	commands: {
 		removeCommand(id: string): void;
 		executeCommandById(id: string): void;
 	};
+}
+
+function remapPath(
+	path: string,
+	oldPath: string,
+	newPath: string,
+): string | null {
+	if (!path) return null;
+	if (path === oldPath) return newPath;
+	if (path.startsWith(oldPath + '/')) {
+		return newPath + path.slice(oldPath.length);
+	}
+	return null;
 }
 
 export default class NoteShortcutPlugin extends Plugin {
@@ -24,7 +36,6 @@ export default class NoteShortcutPlugin extends Plugin {
 	async onload(): Promise<void> {
 		await this.loadSettings();
 
-		// הוספת פקודה מובנית לחזרה לפתק הקודם בהיסטוריה (Back)
 		this.addCommand({
 			id: 'go-back-note',
 			name: 'Go to Previous Note (Back)',
@@ -36,7 +47,6 @@ export default class NoteShortcutPlugin extends Plugin {
 			},
 		});
 
-		// הוספת פקודה מובנית להתקדמות לפתק הבא בהיסטוריה (Forward)
 		this.addCommand({
 			id: 'go-forward-note',
 			name: 'Go to Next Note (Forward)',
@@ -48,25 +58,79 @@ export default class NoteShortcutPlugin extends Plugin {
 			},
 		});
 
+		this.registerEvent(
+			this.app.vault.on('rename', (file, oldPath) => {
+				void this.handleRename(file, oldPath);
+			}),
+		);
+
 		this.updateCommands();
 		this.addSettingTab(new NoteShortcutSettingTab(this.app, this));
 	}
 
 	async loadSettings(): Promise<void> {
-		// מונע שגיאת Unsafe assignment של any
 		const loadedData =
 			(await this.loadData()) as Partial<PluginSettings> | null;
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, loadedData);
+
+		for (const shortcut of this.settings.shortcuts) {
+			shortcut.mode = shortcut.mode ?? 'note';
+			shortcut.filePath = shortcut.filePath ?? '';
+			shortcut.folderPath = shortcut.folderPath ?? '';
+		}
 	}
 
 	async saveSettings(): Promise<void> {
 		await this.saveData(this.settings);
 	}
 
+	async handleRename(file: TAbstractFile, oldPath: string): Promise<void> {
+		let changed = false;
+
+		for (const shortcut of this.settings.shortcuts) {
+			if (shortcut.mode === 'folder') {
+				const newPath = remapPath(
+					shortcut.folderPath,
+					oldPath,
+					file.path,
+				);
+				if (newPath !== null) {
+					shortcut.folderPath = newPath;
+					changed = true;
+				}
+			} else {
+				const newPath = remapPath(
+					shortcut.filePath,
+					oldPath,
+					file.path,
+				);
+				if (newPath !== null) {
+					if (
+						shortcut.filePath === oldPath &&
+						file instanceof TFile
+					) {
+						const oldName = (
+							oldPath.split('/').pop() ?? ''
+						).replace(/\.md$/, '');
+						if (shortcut.name === `Open: ${oldName}`) {
+							shortcut.name = `Open: ${file.basename}`;
+						}
+					}
+					shortcut.filePath = newPath;
+					changed = true;
+				}
+			}
+		}
+
+		if (changed) {
+			await this.saveSettings();
+			this.updateCommands();
+		}
+	}
+
 	updateCommands(): void {
 		const appWithCommands = this.app as AppWithCommands;
 
-		// הסרת פקודות ישנות בצורה בטוחה ללא member access errors
 		for (const id of this.registeredCommandIds) {
 			if (
 				appWithCommands.commands &&
@@ -77,17 +141,21 @@ export default class NoteShortcutPlugin extends Plugin {
 		}
 		this.registeredCommandIds = [];
 
-		// רישום פקודות חדשות מההגדרות
 		for (const shortcut of this.settings.shortcuts) {
-			if (!shortcut.name || !shortcut.filePath) continue;
+			const isFolder = shortcut.mode === 'folder';
+			const target = isFolder ? shortcut.folderPath : shortcut.filePath;
+			if (!shortcut.name || !target) continue;
 
-			const commandId = `note-shortcut-${shortcut.id}`;
 			const cmd = this.addCommand({
-				id: commandId,
+				id: `note-shortcut-${shortcut.id}`,
 				name: shortcut.name,
-				icon: shortcut.icon || 'file',
+				icon: isFolder ? 'folder-open' : 'file-text',
 				callback: () => {
-					void this.openNote(shortcut.filePath);
+					if (isFolder) {
+						void this.openLatestInFolder(shortcut.folderPath);
+					} else {
+						void this.openNote(shortcut.filePath);
+					}
 				},
 			});
 
@@ -105,5 +173,30 @@ export default class NoteShortcutPlugin extends Plugin {
 		} else {
 			new Notice(`Note Shortcut: File not found at "${filePath}"`);
 		}
+	}
+
+	getLatestFileInFolder(folderPath: string): TFile | null {
+		const isRoot = folderPath === '/' || folderPath === '';
+		const files = this.app.vault
+			.getMarkdownFiles()
+			.filter((f) => isRoot || f.path.startsWith(folderPath + '/'));
+
+		let latest: TFile | null = null;
+		for (const f of files) {
+			if (!latest || f.stat.mtime > latest.stat.mtime) {
+				latest = f;
+			}
+		}
+		return latest;
+	}
+
+	async openLatestInFolder(folderPath: string): Promise<void> {
+		const file = this.getLatestFileInFolder(folderPath);
+		if (!file) {
+			new Notice(`Note Shortcut: No notes found in "${folderPath}"`);
+			return;
+		}
+		const leaf = this.app.workspace.getLeaf(false);
+		await leaf.openFile(file);
 	}
 }
